@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "x_to_discord"
+version = "0.1.0"
+description = ""
+authors = ["azzip <azzip-rnd@skvip.org>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+tweepy = "^4.16.0"
+requests = "^2.32.5"
+python-dotenv = "^1.1.1"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
