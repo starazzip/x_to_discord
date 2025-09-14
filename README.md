@@ -3,8 +3,6 @@
 把指定 **X（Twitter）** 使用者的貼文，自動轉發到 **Discord** 頻道。  
 支援速率限制處理、首啟動錨點（不補發歷史）、假資料錄製/回放、以及「免費、穩定、輕量化」翻譯（預設 ultra 模式：MyMemory + 本地快取，選配 LibreTranslate 與 OpenCC 簡→繁）。
 
-> 提示：第一次啟用翻譯 **不會**下載大型模型（已移除 Argos），啟動極快。若要完全停用翻譯，將 `.env` 設為 `TRANSLATE_PROVIDER=none`。
-
 ---
 
 ## 目錄
@@ -14,7 +12,6 @@
 - [安裝與執行](#安裝與執行)
 - [.env 參數](#env-參數)
 - [翻譯（Ultra 模式）](#翻譯ultra-模式)
-- [訊息格式](#訊息格式)
 - [常見問題](#常見問題)
 - [授權](#授權)
 
@@ -49,6 +46,7 @@ x_to_discord/
 ├─ state.json               # 上次處理到的推文 ID（程式運行時產生/更新）
 └─ translations_cache.json  # 翻譯快取（Ultra 模式使用；可刪）
 ```
+
 ---
 
 ## 環境需求
@@ -56,38 +54,57 @@ x_to_discord/
 - Python **3.10+**
 - 依賴（最小化）：
   - `tweepy`、`requests`、`python-dotenv`
+  - （選配）`opencc-python-reimplemented`（若需簡→繁）
 
 ---
 
 ## 安裝與執行
 
+### 1) 取得原始碼
 ```bash
-# 1) 取得原始碼
 git clone https://github.com/starazzip/x_to_discord.git
 cd x_to_discord
+```
 
-# 2) 安裝依賴（使用 Poetry）
-# 若未安裝 Poetry：
-#   pipx install poetry          # 推薦
-#   # 或者：
-#   pip install --user poetry
+### 2) 安裝依賴（使用 Poetry）
 
-# 建立/選擇虛擬環境（可選；不指定則自動）
-poetry env use python3.11        # 依你的 Python 版本調整
+如未安裝 Poetry：
 
-# 安裝專案依賴（讀取 pyproject.toml）
+```bash
+# 推薦方式
+pipx install poetry
+
+# 或使用 pip（使用者範圍安裝）
+pip install --user poetry
+```
+
+建立／指定虛擬環境（可選；不指定則自動）
+
+```bash
+poetry env use python3.11   # 依你的 Python 版本調整
+```
+
+安裝專案依賴（讀取 `pyproject.toml`）
+
+```bash
 poetry install
+```
 
-# 3) 設定環境變數
+### 3) 設定環境變數
+```bash
 cp .env.example .env
 # 編輯 .env，填入 BEARER_TOKEN、TARGET_USERNAME、DISCORD_WEBHOOK_URL 等
+```
 
-# 4) 執行
+### 4) 執行
+```bash
 poetry run python main.py
-# 或先進入虛擬環境再執行：
-# poetry shell
-# python main.py
+```
 
+或先進入虛擬環境再執行：
+```bash
+poetry shell
+python main.py
 ```
 
 ---
@@ -136,7 +153,21 @@ TRANSLATE_CACHE_TTL_SEC=15552000  # 180 天
 
 - **預設使用 MyMemory（免費、無金鑰）**，搭配 **本地快取**（`translations_cache.json`）。
 - **僅對英文貼文**送翻譯請求，節省額度、降低失敗率。
-- 若 `.env` 提供 `FREE_TRANSLATE_ENDPOINT`，則 **LibreTranslate** 作為備援；多數節點回簡體， 
+- 若 `.env` 提供 `FREE_TRANSLATE_ENDPOINT`，則 **LibreTranslate** 作為備援（多數節點回簡體，可搭配 `OPENCC_ENABLED=true` 自動轉繁）。
 - 翻譯失敗或超時時，會直接返回原文，不影響主流程。
 
 ---
+
+## 常見問題
+
+- **X 回 401/403**：檢查 `BEARER_TOKEN` 是否有效、權限是否為 Read，或帳號是否受限。  
+- **429 Too Many Requests（X）**：拉長 `POLL_INTERVAL_SECONDS` 或降低 `MAX_RESULTS`。  
+- **429（Discord）**：已依 `Retry-After` 重試；如仍頻繁遇到，增加每則訊息間隔（程式內已加 0.8s 微節流）。  
+- **FAKE 無資料**：先用 `FAKE_MODE=record` 跑一段時間收集；之後切 `replay` 就能離線測試。  
+- **要改時區或訊息格式**：修改 `app/formatter.py`。
+
+---
+
+## 授權
+
+以原倉庫設定為準；若未標註，預設保留作者所有權利。
