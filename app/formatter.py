@@ -7,6 +7,12 @@ def _format_tw_time(dt: datetime) -> str:
     taipei = timezone(timedelta(hours=8))
     return dt.astimezone(taipei).strftime("%Y-%m-%d %H:%M:%S") + " UTC+8"
 
+def _get_full_text(t) -> str:
+    nt = getattr(t, "note_tweet", None)
+    if isinstance(nt, dict) and "text" in nt and nt["text"]:
+        return nt["text"]
+    return t.text or ""
+
 def build_discord_message(cfg: Config, username: str, tweet: Any) -> str:
     url = f"https://{cfg.embed_domain}/{username}/status/{tweet.id}"
 
@@ -18,7 +24,7 @@ def build_discord_message(cfg: Config, username: str, tweet: Any) -> str:
             dt = datetime.now(timezone.utc)
     created_at = _format_tw_time(dt)
 
-    original = tweet.text or ""
+    original = _get_full_text(tweet)
 
     if cfg.include_translation:
         if cfg.include_translation and getattr(tweet, "lang", "en") == "en":

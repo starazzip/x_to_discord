@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+from typing import Any
 
 @dataclass
 class FakeTweet:
     id: str
     text: str
+    note_tweet: dict
     created_at: datetime
 
 def tweets_to_dicts(tweets: list) -> list[dict]:
@@ -14,7 +16,9 @@ def tweets_to_dicts(tweets: list) -> list[dict]:
         created = t.created_at
         if isinstance(created, datetime):
             created = created.isoformat()
-        out.append({"id": str(t.id), "text": t.text or "", "created_at": created})
+        nt2 = getattr(t, "note_tweet", None)
+        full_text= (nt2.get("text") if isinstance(nt2, dict) and nt2.get("text") else (t.text or ""))
+        out.append({"id": str(t.id), "text": t.text or "", "full_text":full_text, "created_at": created})
     return out
 
 def save_fake_tweets(path: str, items: list[dict]) -> None:
@@ -50,5 +54,5 @@ def load_fake_tweets(path: str, since_id: str | None, max_results: int) -> list[
             created_dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
         except Exception:
             created_dt = datetime.now(timezone.utc)
-        out.append(FakeTweet(id=str(x["id"]), text=x.get("text", ""), created_at=created_dt))
+        out.append(FakeTweet(id=str(x["id"]), text=x.get("text", ""),note_tweet ={'text': x.get('full_text',"")}, created_at=created_dt))
     return out

@@ -34,7 +34,7 @@ def fetch_new_tweets(client: tweepy.Client, cfg: Config, user_id: int | str,
             id=user_id,
             since_id=since_id,
             max_results=cfg.max_results,
-            tweet_fields=["created_at", "text", "entities", "public_metrics"],
+            tweet_fields=["created_at", "text", "entities", "public_metrics", "note_tweet"],
             exclude=exclude if exclude else None
         )
         tweets = resp.data or []
