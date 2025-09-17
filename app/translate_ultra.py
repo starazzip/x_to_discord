@@ -1,133 +1,162 @@
-# app/translate_ultra.py
-import os, re, json, time, hashlib, requests
-from typing import Optional
+"""Simple English to Traditional Chinese translation helper."""
 
-# ---- 快取設定 ----
-CACHE_FILE = os.getenv("TRANSLATE_CACHE_FILE", "translations_cache.json")
-CACHE_TTL_SEC = int(os.getenv("TRANSLATE_CACHE_TTL_SEC", str(180 * 24 * 3600)))  # 180 天
-os.makedirs(os.path.dirname(CACHE_FILE) or ".", exist_ok=True)
+import os
+import re
+from typing import List, Optional
 
-def _load_cache() -> dict:
+import requests
+
+DEFAULT_CHAR_LIMIT = 400
+SENTENCE_ENDINGS = frozenset(".!?") | frozenset({chr(0x3002), chr(0xFF01), chr(0xFF1F)})
+
+
+def _segment_sentences(text: str) -> List[str]:
+    sentences: List[str] = []
+    length = len(text)
+    start = 0
+    while start < length:
+        end = start
+        while end < length and text[end] not in SENTENCE_ENDINGS:
+            end += 1
+        while end < length and text[end] in SENTENCE_ENDINGS:
+            end += 1
+        while end < length and text[end].isspace():
+            end += 1
+        if end == start:
+            end = min(start + 1, length)
+        sentences.append(text[start:end])
+        start = end
+    return sentences
+
+
+def _split_by_tokens(segment: str, limit: int) -> List[str]:
+    tokens = re.findall(r"\S+|\s+", segment)
+    chunks: List[str] = []
+    current = ""
+
+    def flush() -> None:
+        nonlocal current
+        if current:
+            chunks.append(current)
+            current = ""
+
+    for token in tokens:
+        if len(current) + len(token) <= limit:
+            current += token
+            continue
+        flush()
+        if len(token) <= limit:
+            current = token
+            continue
+        for start in range(0, len(token), limit):
+            chunks.append(token[start:start + limit])
+    flush()
+    return chunks
+
+
+def _split_into_chunks(text: str, limit: int) -> List[str]:
+    if not text:
+        return []
+    if limit <= 0:
+        return [text]
+
+    chunks: List[str] = []
+    current = ""
+    for sentence in _segment_sentences(text):
+        if not sentence:
+            continue
+        if len(sentence) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(_split_by_tokens(sentence, limit))
+            continue
+        if len(current) + len(sentence) <= limit:
+            current += sentence
+            continue
+        if current:
+            chunks.append(current)
+        current = sentence
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _resolve_limit() -> int:
     try:
-        with open(CACHE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+        limit = int(os.getenv("ULTRA_FREE_LIMIT", str(DEFAULT_CHAR_LIMIT)))
+    except ValueError:
+        limit = DEFAULT_CHAR_LIMIT
+    limit = max(1, limit)
+    return min(limit, DEFAULT_CHAR_LIMIT)
 
-def _save_cache(cache: dict) -> None:
-    tmp = CACHE_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, CACHE_FILE)
 
-_CACHE = _load_cache()
-
-def _cache_key(text: str) -> str:
-    h = hashlib.sha1(text.encode("utf-8")).hexdigest()
-    return f"en2zhTW:{h}"
-
-def _cache_get(text: str) -> Optional[str]:
-    key = _cache_key(text)
-    item = _CACHE.get(key)
-    now = int(time.time())
-    if item and (now - item.get("ts", 0) <= CACHE_TTL_SEC):
-        return item.get("val")
-    return None
-
-def _cache_put(text: str, val: str) -> None:
-    key = _cache_key(text)
-    _CACHE[key] = {"val": val, "ts": int(time.time())}
-    _save_cache(_CACHE)
-
-# ---- 工具：保護 token ----
-def _mask_tokens(text: str):
-    tokens = re.findall(r'(\$[A-Za-z0-9_]+|@[A-Za-z0-9_]+|https?://\S+)', text)
-    protected, placeholders = text, []
-    for i, tok in enumerate(tokens):
-        ph = f"[[TKN{i}]]"
-        placeholders.append((ph, tok))
-        protected = protected.replace(tok, ph)
-    return protected, placeholders
-
-def _unmask_tokens(text: str, placeholders):
-    for ph, tok in placeholders:
-        text = text.replace(ph, tok)
-    return text
-
-def _maybe_opencc_s2t(s: str) -> str:
-    if os.getenv("OPENCC_ENABLED", "true").strip().lower() != "true":
-        return s
-    try:
-        from opencc import OpenCC
-        return OpenCC("s2t").convert(s)
-    except Exception:
-        return s
-
-# ---- 提供者：MyMemory 免費 ----
 def _via_mymemory(text: str) -> Optional[str]:
     try:
-        r = requests.get(
+        response = requests.get(
             "https://api.mymemory.translated.net/get",
             params={"q": text, "langpair": "en|zh-TW"},
-            timeout=12
+            timeout=12,
         )
-        r.raise_for_status()
-        j = r.json()
-        return (j.get("responseData") or {}).get("translatedText")
+        response.raise_for_status()
+        payload = response.json()
+        return (payload.get("responseData") or {}).get("translatedText")
     except Exception:
         return None
 
-# ---- 提供者：LibreTranslate（選配）----
+
 def _via_libre(text: str) -> Optional[str]:
-    url = os.getenv("FREE_TRANSLATE_ENDPOINT", "").strip()
-    if not url:
+    endpoint = os.getenv("FREE_TRANSLATE_ENDPOINT", "").strip()
+    if not endpoint:
         return None
     try:
         data = {"q": text, "source": "en", "target": "zh", "format": "text"}
         api_key = os.getenv("FREE_TRANSLATE_API_KEY", "").strip()
         if api_key:
             data["api_key"] = api_key
-        r = requests.post(url, data=data, timeout=12)
-        r.raise_for_status()
-        j = r.json()
-        out = j.get("translatedText") or j.get("translation")
-        # 多數 Libre 是簡中 → 轉繁
-        return _maybe_opencc_s2t(out) if out else None
+        response = requests.post(endpoint, data=data, timeout=12)
+        response.raise_for_status()
+        payload = response.json()
+        return payload.get("translatedText") or payload.get("translation")
     except Exception:
         return None
 
-# ---- 對外：英文→繁中（超輕量、可快取、穩定）----
-def translate_en_to_zh_tw_ultra(text: str) -> str:
-    if not text.strip():
-        return text
 
-    # 先查快取
-    cached = _cache_get(text)
-    if cached is not None:
-        return cached
-
-    protected, placeholders = _mask_tokens(text)
-
-    order = [s.strip().lower() for s in os.getenv("ULTRA_PROVIDER_ORDER", "mymemory,libre").split(",") if s.strip()]
+def _translate_once(text: str) -> Optional[str]:
+    order_env = os.getenv("ULTRA_PROVIDER_ORDER", "mymemory,libre")
+    providers = [name.strip().lower() for name in order_env.split(",") if name.strip()]
     tried = set()
-    out: Optional[str] = None
-
-    for provider in order:
-        if provider in tried: 
+    for provider in providers:
+        if provider in tried:
             continue
         tried.add(provider)
         if provider == "mymemory":
-            out = _via_mymemory(protected)
-            if out: 
-                out = _unmask_tokens(out, placeholders)
-                _cache_put(text, out)
-                return out
+            result = _via_mymemory(text)
         elif provider == "libre":
-            out = _via_libre(protected)
-            if out:
-                out = _unmask_tokens(out, placeholders)
-                _cache_put(text, out)
-                return out
+            result = _via_libre(text)
+        else:
+            continue
+        if result:
+            return result
+    return None
 
-    # 全部失敗 → 回原文（也可選擇少量標記）
-    return text
+
+def translate_en_to_zh_tw_ultra(text: str) -> str:
+    """Translate English text to Traditional Chinese within the 400 character limit."""
+    if not text or not text.strip():
+        return text
+
+    limit = _resolve_limit()
+
+    if len(text) <= limit:
+        translated = _translate_once(text)
+        return translated if translated else text
+
+    output: List[str] = []
+    for chunk in _split_into_chunks(text, limit):
+        if not chunk.strip():
+            output.append(chunk)
+            continue
+        translated = _translate_once(chunk)
+        output.append(translated if translated else chunk)
+    return "".join(output) if output else text
