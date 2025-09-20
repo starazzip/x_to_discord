@@ -111,4 +111,4 @@ poetry run python -m unittest
 - `fake_mode=replay` is ideal for demos or UI tweaks without calling live APIs.
 
 ## License
-No license file is bundled yet. Add the appropriate LICENSE before publishing on GitHub.
+This project is released under the MIT License. See LICENSE for details.
